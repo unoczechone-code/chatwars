@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cwd0nqphohmmr"
+
+[deps]
+
+files=["res://loc/strings.en.translation", "res://loc/strings.ru.translation"]
+
+source_file="res://loc/strings.csv"
+dest_files=["res://loc/strings.en.translation", "res://loc/strings.ru.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

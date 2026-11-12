@@ -1,0 +1,24 @@
+# Godot
+game/.godot/
+
+# Build output
+game/build/
+build/
+*.pck
+*.ipa
+*.tmp
+
+# Godot editor cruft
+*.import~
+*.tscn~
+
+# Python
+__pycache__/
+*.pyc
+
+# Docs API dump (generated, large)
+docs_api/
+
+# OS
+.DS_Store
+Thumbs.db

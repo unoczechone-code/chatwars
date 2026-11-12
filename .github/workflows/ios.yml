@@ -1,0 +1,238 @@
+name: iOS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'game/**'
+      - 'tools/**'
+      - '.github/workflows/ios.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_REL: "stable"
+  # Release asset basenames (verified via GitHub API; re-checked by checksum below).
+  GODOT_ASSET: "Godot_v4.7.2-stable_macos.universal.zip"
+  TEMPLATES_ASSET: "Godot_v4.7.2-stable_export_templates.tpz"
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report runner toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          echo "--- xcodebuild ---"
+          xcodebuild -version
+          echo "--- actual developer dir ---"
+          xcode-select -p
+          echo "--- sdks ---"
+          xcodebuild -showsdks
+
+      - name: Cache export templates
+        id: cache-templates
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application\ Support/Godot/export_templates/${{ env.GODOT_VERSION }}.${{ env.GODOT_REL }}
+          key: godot-templates-${{ env.GODOT_VERSION }}-${{ env.GODOT_REL }}-${{ env.TEMPLATES_ASSET }}
+
+      - name: Download Godot editor + checksums
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_REL}"
+          mkdir -p "$RUNNER_TEMP/dl"
+          cd "$RUNNER_TEMP/dl"
+          curl --fail --location --silent --show-error -o "$GODOT_ASSET" "$BASE/$GODOT_ASSET"
+          curl --fail --location --silent --show-error -o SHA512-SUMS.txt "$BASE/SHA512-SUMS.txt"
+          echo "--- verifying editor checksum ---"
+          EXPECT=$(grep " ${GODOT_ASSET}\$" SHA512-SUMS.txt | awk '{print $1}')
+          [ -n "$EXPECT" ] || { echo "::error::$GODOT_ASSET not found in SHA512-SUMS.txt"; exit 1; }
+          ACTUAL=$(shasum -a 512 "$GODOT_ASSET" | awk '{print $1}')
+          echo "expected: $EXPECT"
+          echo "actual:   $ACTUAL"
+          [ "$ACTUAL" = "$EXPECT" ] || { echo "::error::Godot editor checksum mismatch"; exit 1; }
+          unzip -q "$GODOT_ASSET"
+
+      - name: Install Godot editor
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dl"
+          SRC=$(find . -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$SRC" || { echo "::error::no Godot .app extracted"; ls -la; exit 1; }
+          BIN=$(find "$SRC/Contents/MacOS" -type f -perm -111 -print -quit)
+          test -n "$BIN" || { echo "::error::no Godot executable inside .app"; exit 1; }
+          echo "GODOT_BIN=$PWD/${BIN#./}" >> "$GITHUB_ENV"
+          "$PWD/${BIN#./}" --version
+
+      - name: Download + install export templates (cached)
+        if: steps.cache-templates.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_REL}"
+          cd "$RUNNER_TEMP/dl"
+          curl --fail --location --silent --show-error -o "$TEMPLATES_ASSET" "$BASE/$TEMPLATES_ASSET"
+          echo "--- verifying templates checksum ---"
+          ACTUAL=$(shasum -a 512 "$TEMPLATES_ASSET" | awk '{print $1}')
+          EXPECT=$(grep " ${TEMPLATES_ASSET}\$" SHA512-SUMS.txt | awk '{print $1}')
+          echo "expected: ${EXPECT:-<none>}"
+          echo "actual:   $ACTUAL"
+          [ -n "$EXPECT" ] || { echo "::error::$TEMPLATES_ASSET not in SHA512-SUMS.txt"; exit 1; }
+          [ "$ACTUAL" = "$EXPECT" ] || { echo "::error::templates checksum mismatch"; exit 1; }
+          DEST="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.${GODOT_REL}"
+          mkdir -p "$DEST"
+          rm -rf "$RUNNER_TEMP/tpl" && mkdir -p "$RUNNER_TEMP/tpl"
+          unzip -q "$TEMPLATES_ASSET" -d "$RUNNER_TEMP/tpl"
+          # .tpz contains a top-level "templates/" directory
+          cp "$RUNNER_TEMP/tpl/templates/"* "$DEST/"
+          ls -la "$DEST" | head -30
+          test -f "$DEST/ios.zip" || { echo "::error::ios.zip template missing"; exit 1; }
+
+      - name: Import project (headless)
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --headless --path game --import
+          echo "import exit: $?"
+
+      - name: Export Xcode project (project-only)
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/build/xcode"
+          "$GODOT_BIN" --headless --path game \
+            --export-release "iOS" "$GITHUB_WORKSPACE/build/xcode/ChatWars.xcodeproj"
+          test -d "$GITHUB_WORKSPACE/build/xcode/ChatWars.xcodeproj" || {
+            echo "::error::ChatWars.xcodeproj was not produced"; exit 1; }
+          ls -la "$GITHUB_WORKSPACE/build/xcode"
+
+      - name: List Xcode schemes
+        run: |
+          set -euo pipefail
+          xcodebuild -list -json -project "$GITHUB_WORKSPACE/build/xcode/ChatWars.xcodeproj" | tee schemes.json
+
+      - name: Build Release for generic/platform=iOS (unsigned)
+        run: |
+          set -euo pipefail
+          SCHEME=$(python3 -c "import json;d=json.load(open('schemes.json'));print(d['project']['schemes'][0])")
+          echo "Using scheme: $SCHEME"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          set -o pipefail
+          xcodebuild \
+            -project "$GITHUB_WORKSPACE/build/xcode/ChatWars.xcodeproj" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            build 2>&1 | tee build.log
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP=$(find "$GITHUB_WORKSPACE/build/dd/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP" || { echo "::error::no .app produced"; exit 1; }
+          echo "APP=$APP"
+          echo "APP_PATH=$APP" >> "$GITHUB_ENV"
+          plutil -p "$APP/Info.plist" | head -40
+          mkdir -p "$GITHUB_WORKSPACE/build/ipa/Payload"
+          ditto "$APP" "$GITHUB_WORKSPACE/build/ipa/Payload/$(basename "$APP")"
+          cd "$GITHUB_WORKSPACE/build/ipa"
+          zip -qry "$GITHUB_WORKSPACE/build/ChatWars-unsigned.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/build/ChatWars-unsigned.ipa"
+
+      - name: Inspect app binary and write build manifest
+        run: |
+          set -euo pipefail
+          APP="$APP_PATH"
+          EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist")
+          echo "executable=$EXE_NAME bundle=$BUNDLE_ID minOS=$MIN_OS"
+
+          BIN_PATH="$APP/$EXE_NAME"
+          test -f "$BIN_PATH" || { echo "::error::executable $EXE_NAME not found in app"; ls -la "$APP"; exit 1; }
+
+          echo "--- architecture ---"
+          lipo -info "$BIN_PATH"
+          file "$BIN_PATH"
+          lipo -info "$BIN_PATH" | grep -q arm64 || { echo "::error::binary is not arm64"; exit 1; }
+
+          echo "--- orientations ---"
+          /usr/libexec/PlistBuddy -c "Print :UISupportedInterfaceOrientations" "$APP/Info.plist" || true
+
+          # Locate the external PCK. Godot writes <name>.pck next to the .xcodeproj and
+          # bundles it into the app; record where it actually ended up.
+          PCK_REL=$(cd "$APP" && find . -name '*.pck' -print -quit | sed 's|^\./||')
+          if [ -n "$PCK_REL" ]; then
+            echo "PCK found in app: $PCK_REL"
+            PCK_SHA=$(shasum -a 256 "$APP/$PCK_REL" | awk '{print $1}')
+            echo "PCK_SHA=$PCK_SHA" >> "$GITHUB_ENV"
+          else
+            echo "::warning::no .pck found inside the app bundle; PCK may be embedded"
+            PCK_REL=""
+          fi
+
+          IPA="$GITHUB_WORKSPACE/build/ChatWars-unsigned.ipa"
+          IPA_SHA=$(shasum -a 256 "$IPA" | awk '{print $1}')
+          IPA_SIZE=$(stat -f%z "$IPA")
+          PRESET_SHA=$(shasum -a 256 "$GITHUB_WORKSPACE/game/export_presets.cfg" | awk '{print $1}')
+
+          python3 - "$APP" "$PCK_REL" <<'PY'
+          import json, os, subprocess, sys
+          app_dir, pck_rel = sys.argv[1], sys.argv[2]
+          def sh(cmd):
+              return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
+          manifest = {
+              "git_commit": os.environ.get("GITHUB_SHA", ""),
+              "git_ref": os.environ.get("GITHUB_REF", ""),
+              "godot_version": os.environ.get("GODOT_VERSION", ""),
+              "godot_release": os.environ.get("GODOT_REL", ""),
+              "renderer": "gl_compatibility",
+              "preset_hash": sh(f'shasum -a 256 "{os.environ["GITHUB_WORKSPACE"]}/game/export_presets.cfg" | cut -d" " -f1'),
+              "xcode_version": sh("xcodebuild -version | head -1"),
+              "xcode_path": sh("xcode-select -p"),
+              "sdk": sh("xcodebuild -showsdks | grep iphoneos || true"),
+              "run": {
+                  "bundle_id": sh(f'/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "{app_dir}/Info.plist"'),
+                  "executable": sh(f'/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "{app_dir}/Info.plist"'),
+                  "min_os": sh(f'/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "{app_dir}/Info.plist"'),
+                  "app_name": os.path.basename(app_dir),
+                  "pck_entry": f"{os.path.basename(app_dir)}/{pck_rel}" if pck_rel else None,
+                  "pck_sha256": (sh(f'shasum -a 256 "{app_dir}/{pck_rel}" | cut -d" " -f1') if pck_rel else None),
+                  "ipa_sha256": sh(f'shasum -a 256 "{os.environ["GITHUB_WORKSPACE"]}/build/ChatWars-unsigned.ipa" | cut -d" " -f1'),
+                  "ipa_bytes": int(sh(f'stat -f%z "{os.environ["GITHUB_WORKSPACE"]}/build/ChatWars-unsigned.ipa"') or 0),
+              },
+          }
+          with open(os.environ["GITHUB_WORKSPACE"] + "/build/build-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatWars-unsigned-ipa
+          path: |
+            build/ChatWars-unsigned.ipa
+            build/build-manifest.json
+            build.log
+          retention-days: 30
