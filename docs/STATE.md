@@ -1,31 +1,39 @@
-# STATE
-
-Living state file. Update after every significant step so work can resume after a context break.
-
-**Last updated:** 2026-11-12
-
 ## Stage
 
-**Stage A2 — DONE (CI unsigned IPA produced and verified). Next: A3 device install — blocked on human.**
+**Stage C — MVP implemented, build produced. Device playtest pending.**
 
 ## Done
 
-- [x] GitHub auth: classic PAT provided by owner; `gh` logged in as `unoczechone-code`.
-- [x] Repo `unoczechone-code/chatwars` (public, no secrets).
-- [x] CI run **43214044960** — green on `macos-26` (arm64, Xcode 26.6, iphoneos26.5).
-- [x] Artifact `ChatWars-unsigned-ipa`: `ChatWars-unsigned.ipa` 24.6 MB, zip CRC OK,
-      `Payload/ChatWars.app`, bundle `com.chatwars.game`, exe `ChatWars` arm64 Mach-O,
-      `UIDeviceFamily=[1]` (iPhone), MinimumOSVersion 15.0, PCK `ChatWars.app/ChatWars.pck`
-      sha256 matches `build-manifest.json`.
-- [x] Fixes needed to reach green (each root-caused from Godot/engine source 4.7.2):
-      1. iOS icon slots empty → generated 48 icons (`tools/make_icons.py`).
-      2. `import_etc2_astc=false` → empty-message config error → set `true`.
-      3. `targeted_device_family` is an index (0=iPhone,1=iPad,2=both) → set `0`.
+- [x] Stage A closed: installed and launched on iPhone 15 Pro / iOS 27.2 via
+      LiveContainer + SideStore 3.8.8 (free Apple ID).
+- [x] Stage B (PCK hot-swap) deliberately skipped by the owner's direction: not needed
+      while full CI builds cost ~2 minutes. `tools/swap_pck.py` and its 18 tests remain
+      available but are not on the critical path.
+- [x] MVP gameplay implemented in `game/scripts/`:
+      180s run, 3 waves, boss at 120s, 3 enemy kinds + boss, auto-attack, drag movement,
+      AoE button, pause, 6 upgradable stats with stack caps, 5 screens, ru/en,
+      best score / wins / settings persistence.
+- [x] CI run 43222755789 green (macos-26, Xcode 26.6). Artifact verified: arm64,
+      UIDeviceFamily=[1], PCK sha256 matches manifest, all 17 scripts/scenes present
+      inside the packed PCK.
+- [x] Tests: smoke, gameplay (24), UI flow (19), soak (full 180s run + cap enforcement
+      + no leaks) — all green; swap_pck 18/18.
+
+## Bugs the tests caught (all fixed)
+
+1. The upgrade prompt freed the running game, so every pick destroyed the run.
+   The run is now detached and restored as the same instance.
+2. A pending upgrade at 120s suppressed the boss spawn.
+3. Pause button was 31pt tall — below the 44pt touch minimum.
+4. Runs could start paused if the previous one ended on an upgrade.
 
 ## Blockers
 
-1. **iPhone details + installer channel** — model, iOS version, LiveContainer/SideStore/AltStore,
-   Apple ID type. Needed to install and run the IPA on the device (gate A).
+None technically. Needs a device playtest to judge balance and confirm the new build runs.
+
+## Next single step
+
+Owner installs `ChatWars-MVP.ipa` and plays one full run; then tune `balance.gd`.
 
 - [x] Environment verified: Godot 4.7.2.stable.official.ed1daf0bf present and runs; `gh` installed
       (2.103.3, SHA-256 verified); Python 3.12; git 2.56.1.
