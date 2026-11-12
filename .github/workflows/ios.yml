@@ -26,15 +26,28 @@ env:
 jobs:
   build:
     name: Build unsigned IPA
-    # macOS arm64 pools (macos-26, macos-15) are frequently saturated and the job is
-    # never acquired. macos-15-intel is a separate Intel pool; it still cross-compiles
-    # the same arm64 iOS binary because the target is fixed via ARCHS=arm64.
-    runs-on: ${{ vars.MACOS_RUNNER || 'macos-15-intel' }}
+    # Godot 4.7.2's iOS templates link against a recent SDK; Xcode 16.4 / iOS 18.5
+    # fails at link time. The arm64 pools provide Xcode 26. macos-15-intel does not,
+    # so it is not a usable fallback for this engine version.
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-15' }}
     timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select newest available Xcode
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          # Prefer the highest-numbered Xcode on the image; the default one may be old
+          # enough that Godot's prebuilt templates fail to link.
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          test -n "$BEST" || { echo "::error::no Xcode on the runner"; exit 1; }
+          echo "Selected: $BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          xcode-select -p
 
       - name: Report runner toolchain
         run: |
@@ -47,6 +60,14 @@ jobs:
           xcode-select -p
           echo "--- sdks ---"
           xcodebuild -showsdks
+          SDK_VER=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iphoneos SDK: $SDK_VER"
+          # Godot 4.7.2 templates are built against a recent SDK; older Xcode links fail.
+          MAJOR=${SDK_VER%%.*}
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::iphoneos SDK $SDK_VER is too old for Godot ${GODOT_VERSION} templates (need >= 26)"
+            exit 1
+          fi
 
       - name: Cache export templates
         id: cache-templates
