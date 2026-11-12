@@ -26,9 +26,10 @@ env:
 jobs:
   build:
     name: Build unsigned IPA
-    # macos-26 and macos-15 are separate arm64 pools; 26 is often saturated,
-    # so fall back to the other pool when the first choice cannot be acquired.
-    runs-on: ${{ vars.MACOS_RUNNER || 'macos-15' }}
+    # macOS arm64 pools (macos-26, macos-15) are frequently saturated and the job is
+    # never acquired. macos-15-intel is a separate Intel pool; it still cross-compiles
+    # the same arm64 iOS binary because the target is fixed via ARCHS=arm64.
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-15-intel' }}
     timeout-minutes: 60
 
     steps:
