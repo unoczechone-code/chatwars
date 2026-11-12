@@ -6,9 +6,26 @@ Living state file. Update after every significant step so work can resume after 
 
 ## Stage
 
-**Stage A2 — CI build.** Blocked on GitHub authentication (needs the human).
+**Stage A2 — DONE (CI unsigned IPA produced and verified). Next: A3 device install — blocked on human.**
 
 ## Done
+
+- [x] GitHub auth: classic PAT provided by owner; `gh` logged in as `unoczechone-code`.
+- [x] Repo `unoczechone-code/chatwars` (public, no secrets).
+- [x] CI run **43214044960** — green on `macos-26` (arm64, Xcode 26.6, iphoneos26.5).
+- [x] Artifact `ChatWars-unsigned-ipa`: `ChatWars-unsigned.ipa` 24.6 MB, zip CRC OK,
+      `Payload/ChatWars.app`, bundle `com.chatwars.game`, exe `ChatWars` arm64 Mach-O,
+      `UIDeviceFamily=[1]` (iPhone), MinimumOSVersion 15.0, PCK `ChatWars.app/ChatWars.pck`
+      sha256 matches `build-manifest.json`.
+- [x] Fixes needed to reach green (each root-caused from Godot/engine source 4.7.2):
+      1. iOS icon slots empty → generated 48 icons (`tools/make_icons.py`).
+      2. `import_etc2_astc=false` → empty-message config error → set `true`.
+      3. `targeted_device_family` is an index (0=iPhone,1=iPad,2=both) → set `0`.
+
+## Blockers
+
+1. **iPhone details + installer channel** — model, iOS version, LiveContainer/SideStore/AltStore,
+   Apple ID type. Needed to install and run the IPA on the device (gate A).
 
 - [x] Environment verified: Godot 4.7.2.stable.official.ed1daf0bf present and runs; `gh` installed
       (2.103.3, SHA-256 verified); Python 3.12; git 2.56.1.
