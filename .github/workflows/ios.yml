@@ -26,7 +26,9 @@ env:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-26
+    # macos-26 and macos-15 are separate arm64 pools; 26 is often saturated,
+    # so fall back to the other pool when the first choice cannot be acquired.
+    runs-on: ${{ vars.MACOS_RUNNER || 'macos-15' }}
     timeout-minutes: 60
 
     steps:
