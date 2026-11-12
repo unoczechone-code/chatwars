@@ -117,6 +117,28 @@ func get_settings() -> Dictionary:
 	return _data.get("settings", {})
 
 
+func set_setting(key: String, value: bool) -> void:
+	if _data["settings"].has(key):
+		_data["settings"][key] = value
+
+
+## Records one finished run. Only a win increments the win counter; both update best score.
+func record_run(won: bool, score: int) -> void:
+	if score > int(_data.get("best_score", 0)):
+		_data["best_score"] = maxi(score, 0)
+	if won:
+		_data["total_wins"] = int(_data.get("total_wins", 0)) + 1
+	save_game()
+
+
+func get_best_score() -> int:
+	return int(_data.get("best_score", 0))
+
+
+func get_total_wins() -> int:
+	return int(_data.get("total_wins", 0))
+
+
 func set_locale(loc: String) -> void:
 	if loc not in ["ru", "en"]:
 		return

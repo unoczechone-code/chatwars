@@ -1,100 +1,117 @@
-# Headless smoke test: runs inside the real project, exercises save + scene + locale.
+# Smoke test: save persistence, corruption recovery, localisation, and touch targets.
+# Scene-level checks target the real game screens.
 extends SceneTree
 
 var _failures: Array[String] = []
 
 
 func _check(cond: bool, msg: String) -> void:
-	if cond:
-		print("  PASS  ", msg)
-	else:
-		print("  FAIL  ", msg)
+	print(("  PASS  " if cond else "  FAIL  "), msg)
+	if not cond:
 		_failures.append(msg)
 
 
 func _init() -> void:
-	print("=== ChatWars headless smoke test ===")
+	call_deferred("_run")
+
+
+func _run() -> void:
+	print("=== ChatWars smoke test ===")
 	print("Godot: ", Engine.get_version_info().get("string", "?"))
 	print("Renderer: ", ProjectSettings.get_setting("rendering/renderer/rendering_method", "?"))
-	print("Current locale: ", TranslationServer.get_locale())
 
-	# 1. Autoload present
 	var sm: Node = root.get_node_or_null("SaveManager")
-	if sm == null:
-		# --script builds a bare SceneTree with no autoloads; instantiate manually so
-		# the same code path is exercised. The real game uses the autoload normally.
-		print("  NOTE  no autoload under --script; instantiating SaveManager manually")
-		var script_res: Script = load("res://scripts/save_manager.gd")
-		sm = script_res.new()
-		sm.name = "SaveManager"
-		root.add_child(sm)
 	_check(sm != null, "SaveManager autoload exists")
 	if sm == null:
-		print("\nFATAL: no SaveManager, aborting")
+		print("\nFATAL: no SaveManager")
 		quit(1)
 		return
 
-	# 2. Clean slate: remove any prior save so the test is deterministic
+	# Deterministic start: wipe any save left by a previous test run. Creating a fresh
+	# SaveManager instance afterwards guarantees no in-memory state carries over.
 	for p in ["user://save.json", "user://save.json.bak", "user://save.corrupt.json"]:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
+	var fresh_script: Script = load("res://scripts/save_manager.gd")
+	var fresh: Node = fresh_script.new()
+	root.remove_child(sm)
+	sm.free()
+	fresh.name = "SaveManager"
+	root.add_child(fresh)
+	sm = fresh
 
-	# 3. Counter starts at 0 and increments
 	_check(sm.get_counter() == 0, "fresh counter is 0")
-	var v1: int = sm.bump_counter()
-	var v2: int = sm.bump_counter()
-	_check(v1 == 1 and v2 == 2, "bump_counter -> 1 then 2 (got %d, %d)" % [v1, v2])
+	_check(sm.bump_counter() == 1, "bump_counter -> 1")
+	_check(sm.bump_counter() == 2, "bump_counter -> 2")
 
-	# 4. Save file exists and is valid JSON
 	_check(FileAccess.file_exists("user://save.json"), "save.json written")
-	var f := FileAccess.open("user://save.json", FileAccess.READ)
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
-	f.close()
-	_check(typeof(parsed) == TYPE_DICTIONARY, "save.json parses as dict")
-	_check(typeof(parsed) == TYPE_DICTIONARY and int((parsed as Dictionary).get("counter", -1)) == 2,
-		"persisted counter == 2")
-
-	# 5. Reload from disk (simulates app restart) and confirm the counter is restored
 	sm.load_game()
-	_check(sm.get_counter() == 2, "counter restored after reload (got %d)" % sm.get_counter())
+	_check(sm.get_counter() == 2, "counter restored after reload")
 
-	# 6. Locale switch persists
+	# Run results feed best score and win count.
+	sm.record_run(false, 500)
+	_check(sm.get_best_score() == 500, "best score recorded on a loss")
+	_check(sm.get_total_wins() == 0, "a loss does not count as a win")
+	sm.record_run(true, 300)
+	_check(sm.get_best_score() == 500, "lower score does not replace the best")
+	_check(sm.get_total_wins() == 1, "a win increments the win counter")
+
+	# Settings round trip.
 	sm.set_locale("ru")
+	sm.set_setting("music", false)
 	sm.save_game()
 	sm.load_game()
-	_check(String(sm.get_settings().get("locale", "")) == "ru", "locale 'ru' persisted")
+	_check(String(sm.get_settings().get("locale", "")) == "ru", "locale persisted")
+	_check(sm.get_settings().get("music") == false, "music setting persisted")
 
-	# 7. Corrupt-save recovery: write garbage, reload, must not crash and must quarantine
+	# Corrupt save must not crash and must be quarantined.
 	var bad := FileAccess.open("user://save.json", FileAccess.WRITE)
-	bad.store_string("{ this is not json ]]")
+	bad.store_string("{ not json ]]")
 	bad.close()
 	sm.load_game()
-	_check(sm.get_counter() == 0, "corrupt save fell back to defaults")
+	_check(sm.get_counter() == 0, "corrupt save falls back to defaults")
 	_check(FileAccess.file_exists("user://save.corrupt.json"), "corrupt save quarantined")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://save.corrupt.json"))
 
-	# 8. Scene instantiates and its labels resolve
-	var scene: PackedScene = load("res://scenes/main.tscn")
-	_check(scene != null, "main.tscn loads")
-	if scene != null:
-		var inst: Node = scene.instantiate()
+	# Every screen loads, and its static buttons meet the 44pt touch minimum.
+	var screens := ["title", "game", "upgrade_pick", "result", "settings"]
+	for name in screens:
+		var path := "res://scenes/%s.tscn" % name
+		var packed: PackedScene = load(path)
+		_check(packed != null, "%s loads" % name)
+		if packed == null:
+			continue
+		var inst: Node = packed.instantiate()
 		root.add_child(inst)
 		await process_frame
-		var lbl: Node = inst.get_node_or_null("Center/Layout/CounterLabel")
-		_check(lbl != null, "CounterLabel found")
-		if lbl != null:
-			_check((lbl as Label).text.length() > 0, "CounterLabel has text: '%s'" % (lbl as Label).text)
-		var btn: Node = inst.get_node_or_null("Center/Layout/HitButton")
-		_check(btn != null and (btn as Button).custom_minimum_size.x >= 44,
-			"HitButton meets >=44px touch target")
+		await process_frame
+		for b in _all_buttons(inst):
+			var btn := b as Button
+			var h := maxf(btn.custom_minimum_size.y, btn.size.y)
+			_check(h >= 44.0, "%s: button '%s' >= 44pt (%.0f)" % [name, btn.text, h])
+		inst.queue_free()
+		await process_frame
 
-	# 9. Translation actually resolves in both locales
+	# Translation resolves in both locales.
 	TranslationServer.set_locale("ru")
-	var ru_title := tr("GAME_TITLE")
+	var ru := TranslationServer.translate("GAME_TITLE")
 	TranslationServer.set_locale("en")
-	var en_title := tr("GAME_TITLE")
-	_check(ru_title != "GAME_TITLE", "ru translation resolves ('%s')" % ru_title)
-	_check(en_title != "GAME_TITLE", "en translation resolves ('%s')" % en_title)
-	_check(ru_title != en_title, "ru and en differ")
+	var en := TranslationServer.translate("GAME_TITLE")
+	_check(ru != "" and ru != "GAME_TITLE", "ru translates the title ('%s')" % ru)
+	_check(en != "" and en != "GAME_TITLE", "en translates the title ('%s')" % en)
+	_check(ru != en, "ru and en differ")
+
+	for key in ["BTN_START", "RESULT_WIN", "UPG_DAMAGE", "PAUSED"]:
+		_check(TranslationServer.translate(key) != key, "key %s translated" % key)
 
 	print("=== RESULT: %d failure(s) ===" % _failures.size())
 	quit(0 if _failures.is_empty() else 1)
+
+
+func _all_buttons(n: Node) -> Array[Node]:
+	var out: Array[Node] = []
+	if n is Button:
+		out.append(n)
+	for c in n.get_children():
+		out.append_array(_all_buttons(c))
+	return out

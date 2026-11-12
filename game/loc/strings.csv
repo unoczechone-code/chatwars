@@ -1,4 +1,30 @@
 keys,en,ru
 GAME_TITLE,Chat Wars,Битва за чат
-COUNTER_LABEL,Taps: %d,Нажатий: %d
-LANG_SWITCH,Switch to RU,Переключить на EN
+BTN_START,Start,Начать
+BTN_SETTINGS,Settings,Настройки
+BTN_RETRY,Retry,Ещё раз
+BTN_MENU,Menu,В меню
+BTN_BACK,Back,Назад
+BTN_CONTINUE,Continue,Продолжить
+BTN_AOE,AoE,Удар
+BTN_LANGUAGE,Language,Язык
+BEST_SCORE,Best: %d,Рекорд: %d
+SCORE,Score: %d,Счёт: %d
+SCORE_SHORT,Score %d,Счёт %d
+WAVE,Wave %d,Волна %d
+SURVIVED,Survived: %ds,Продержался: %d с
+WINS,Wins: %d,Побед: %d
+RESULT_WIN,Victory!,Победа!
+RESULT_LOSE,Defeat,Поражение
+UPGRADE_PICK,Choose an upgrade,Выбери улучшение
+UPG_DAMAGE,Damage,Урон
+UPG_RATE,Fire rate,Скорострельность
+UPG_HP,Max HP,Здоровье
+UPG_SPEED,Move speed,Скорость
+UPG_AOE,AoE radius,Радиус удара
+UPG_CD,AoE cooldown,Перезарядка удара
+SET_MUSIC,Music,Музыка
+SET_SFX,Sound,Звук
+SET_HAPTICS,Haptics,Вибрация
+PAUSED,Paused,Пауза
+CREDITS_TEXT,"Original offline game. Godot Engine 4.7.2 (MIT). All art created for this project.",Оригинальная офлайн-игра. Godot Engine 4.7.2 (MIT). Весь арт создан для этого проекта.
