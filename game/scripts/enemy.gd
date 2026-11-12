@@ -1,5 +1,5 @@
-# Enemy — one node type for all kinds, configured from data. Drawn procedurally
-# so the MVP needs no art pipeline; swap in sprites later behind the same API.
+# Enemy — all kinds share one node, configured from data. Silhouettes differ by shape,
+# not just colour, so the three types are distinguishable at a glance on a small screen.
 extends Area2D
 class_name Enemy
 
@@ -10,6 +10,11 @@ const KIND_WEAVER := "weaver"
 const KIND_BRUTE := "brute"
 const KIND_BOSS := "boss"
 
+# Boss attack phases.
+const ATK_NONE := ""
+const ATK_FAN := "fan"
+const ATK_SWEEP := "sweep"
+
 var kind := KIND_FALLER
 var hp := 1
 var max_hp := 1
@@ -18,18 +23,29 @@ var contact_damage := 5
 var score_value := 10
 var radius := 26.0
 
+var dead := false
+
 var _t := 0.0
 var _base_x := 0.0
 var _amp := 0.0
 var _freq := 1.0
 var _is_boss := false
+var _flash := 0.0
 
-# Boss attack timers.
-var _burst_t := 0.0
-var _sweep_t := 0.0
-var _boss_burst_count := 7
+# Boss state
+var _burst_wait := 0.0
+var _sweep_wait := 0.0
+var _burst_period := 2.6
+var _sweep_period := 6.5
+var _burst_count := 7
+var _telegraph := ATK_NONE
+var _telegraph_t := 0.0
+var _telegraph_dur := 0.0
+var _drift_dir := 1.0
 
-var dead := false
+
+func _init() -> void:
+	add_to_group("enemies")
 
 
 func setup(cfg: Dictionary) -> void:
@@ -43,84 +59,110 @@ func setup(cfg: Dictionary) -> void:
 	_amp = float(cfg.get("amplitude", 0.0))
 	_freq = float(cfg.get("frequency", 1.0))
 	_is_boss = kind == KIND_BOSS
-	_boss_burst_count = int(cfg.get("burst_count", 7))
+	_burst_count = int(cfg.get("burst_count", 7))
+	_burst_period = float(cfg.get("burst_interval", 2.6))
+	_sweep_period = float(cfg.get("sweep_interval", 6.5))
 	_base_x = position.x
-	_burst_t = float(cfg.get("burst_interval", 2.6))
-	_sweep_t = float(cfg.get("sweep_interval", 6.5))
-
-
-func _ready() -> void:
-	add_to_group("enemies")
+	_burst_wait = _burst_period
+	_sweep_wait = _sweep_period
 	z_index = 5
+
+
+func is_telegraphing() -> bool:
+	return _telegraph != ATK_NONE
 
 
 func _process(delta: float) -> void:
 	if dead:
 		return
 	_t += delta
+	if _flash > 0.0:
+		_flash -= delta
 
 	if _is_boss:
-		# Boss descends to a holding line then drifts side to side.
-		if position.y < 240.0:
-			position.y += speed * delta
-		else:
-			_base_x += speed * 0.8 * delta
-			position.x = _base_x
-		_burst_t -= delta
-		_sweep_t -= delta
-		if _burst_t <= 0.0:
-			_burst_t = float(_burst_interval_cfg())
-			_emit_burst()
-		if _sweep_t <= 0.0:
-			_sweep_t = float(_sweep_interval_cfg())
-			_emit_sweep()
+		_process_boss(delta)
 	else:
 		position.y += speed * delta
 		if _amp > 0.0:
 			position.x = _base_x + sin(_t * _freq) * _amp
+		if position.y > 1450.0:
+			_despawn()
 
 	queue_redraw()
 
-	# Left the playfield bottom.
-	if position.y > 1450.0:
-		_despawn()
+
+func _process_boss(delta: float) -> void:
+	# Descend, then patrol sideways inside the top band.
+	if position.y < 250.0:
+		position.y += speed * delta
+	else:
+		position.x += speed * 0.9 * _drift_dir * delta
+		if position.x < 140.0:
+			position.x = 140.0
+			_drift_dir = 1.0
+		elif position.x > 580.0:
+			position.x = 580.0
+			_drift_dir = -1.0
+
+	# A telegraph in progress must resolve before any new attack starts.
+	if _telegraph != ATK_NONE:
+		_telegraph_t -= delta
+		if _telegraph_t <= 0.0:
+			_fire(_telegraph)
+			_telegraph = ATK_NONE
+		return
+
+	_burst_wait -= delta
+	_sweep_wait -= delta
+
+	if _sweep_wait <= 0.0 and _sweep_wait <= _burst_wait:
+		_sweep_wait = _sweep_period
+		_begin_telegraph(ATK_SWEEP, 0.85)
+	elif _burst_wait <= 0.0:
+		_burst_wait = _burst_period
+		_begin_telegraph(ATK_FAN, 0.6)
 
 
-var _burst_interval := 2.6
-var _sweep_interval := 6.5
+func _begin_telegraph(atk: String, duration: float) -> void:
+	_telegraph = atk
+	_telegraph_t = duration
+	_telegraph_dur = duration
 
 
-func _burst_interval_cfg() -> float:
-	return _burst_interval
-
-
-func _sweep_interval_cfg() -> float:
-	return _sweep_interval
-
-
-func _emit_burst() -> void:
-	# Radial telegraph-then-fire is represented by a downward fan of projectiles.
-	var battlefield := get_parent()
+func _fire(atk: String) -> void:
+	# The enemy lives under Game/Field, so the battle API is on the grandparent.
+	var battlefield := _battlefield()
 	if battlefield == null:
 		return
-	for i in _boss_burst_count:
-		var angle := deg_to_rad(lerpf(60.0, 120.0, float(i) / maxf(1.0, _boss_burst_count - 1)))
-		battlefield.spawn_enemy_bullet(global_position, Vector2.RIGHT.rotated(angle) * 320.0, 12)
+	if atk == ATK_FAN:
+		for i in _burst_count:
+			var t := float(i) / maxf(1.0, _burst_count - 1)
+			var angle := deg_to_rad(lerpf(55.0, 125.0, t))
+			battlefield.spawn_enemy_bullet(
+				global_position, Vector2.RIGHT.rotated(angle) * 340.0, 12)
+	else:
+		# Sweep: a row of shots falling across the boss's width.
+		for i in 5:
+			var offset := Vector2(lerpf(-170.0, 170.0, i / 4.0), 0.0)
+			battlefield.spawn_enemy_bullet(
+				global_position + offset, Vector2(0, 1) * 300.0, 10)
 
 
-func _emit_sweep() -> void:
-	var battlefield := get_parent()
-	if battlefield == null:
-		return
-	for i in 5:
-		var offset := Vector2(lerpf(-160.0, 160.0, i / 4.0), 0.0)
-		battlefield.spawn_enemy_bullet(global_position + offset, Vector2(0, 1) * 260.0, 10)
+## Walks up to the node that exposes spawn_enemy_bullet (the Game node).
+func _battlefield() -> Node:
+	var n := get_parent()
+	while n != null:
+		if n.has_method("spawn_enemy_bullet"):
+			return n
+		n = n.get_parent()
+	return null
 
 
 func take_damage(amount: int) -> void:
 	if dead:
 		return
 	hp -= amount
+	_flash = 0.12
 	if hp <= 0:
 		_die()
 
@@ -149,22 +191,60 @@ func _draw() -> void:
 			col = Color(0.75, 0.55, 0.95)
 		KIND_BOSS:
 			col = Color(0.98, 0.30, 0.45)
+	if _flash > 0.0:
+		col = col.lerp(Color(1, 1, 1), 0.55)
 
-	if _is_boss:
-		# Boxy boss silhouette with an eye slit.
-		var r := radius
-		draw_rect(Rect2(-r, -r * 0.9, r * 2.0, r * 1.8), col, true)
-		draw_rect(Rect2(-r, -r * 0.9, r * 2.0, r * 1.8), col.darkened(0.35), false, 4.0)
-		draw_rect(Rect2(-r * 0.6, -r * 0.25, r * 1.2, r * 0.35), Color(0.1, 0.1, 0.16), true)
-	else:
-		draw_circle(Vector2.ZERO, radius, col)
-		draw_circle(Vector2.ZERO, radius, col.darkened(0.35), false, 3.0)
-		# Two eyes so the direction reads clearly.
-		draw_circle(Vector2(-radius * 0.3, -radius * 0.15), radius * 0.16, Color(0.1, 0.1, 0.16))
-		draw_circle(Vector2(radius * 0.3, -radius * 0.15), radius * 0.16, Color(0.1, 0.1, 0.16))
+	match kind:
+		KIND_FALLER:
+			# Teardrop pointing at the player: reads as "falling".
+			var pts := PackedVector2Array([
+				Vector2(0, radius * 1.15),
+				Vector2(-radius, -radius * 0.6),
+				Vector2(0, -radius),
+				Vector2(radius, -radius * 0.6),
+			])
+			draw_colored_polygon(pts, col)
+			draw_polyline(pts, col.darkened(0.4), 3.0)
+		KIND_WEAVER:
+			# Diamond: wide and fast-looking.
+			var pts := PackedVector2Array([
+				Vector2(0, -radius), Vector2(radius, 0),
+				Vector2(0, radius), Vector2(-radius, 0),
+			])
+			draw_colored_polygon(pts, col)
+			draw_polyline(pts, col.darkened(0.4), 3.0)
+		KIND_BRUTE:
+			# Heavy square with corner bolts.
+			draw_rect(Rect2(-radius, -radius, radius * 2.0, radius * 2.0), col, true)
+			draw_rect(Rect2(-radius, -radius, radius * 2.0, radius * 2.0),
+				col.darkened(0.45), false, 5.0)
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					draw_circle(Vector2(sx * radius * 0.62, sy * radius * 0.62),
+						radius * 0.13, col.darkened(0.5))
+		KIND_BOSS:
+			var r := radius
+			draw_rect(Rect2(-r, -r * 0.85, r * 2.0, r * 1.7), col, true)
+			draw_rect(Rect2(-r, -r * 0.85, r * 2.0, r * 1.7), col.darkened(0.4), false, 5.0)
+			# Eye slit brightens while charging an attack.
+			var eye := Color(1, 0.9, 0.4) if _telegraph != ATK_NONE else Color(0.12, 0.1, 0.18)
+			draw_rect(Rect2(-r * 0.62, -r * 0.22, r * 1.24, r * 0.34), eye, true)
+			# Horns distinguish it from a brute.
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-r, -r * 0.85), Vector2(-r * 0.72, -r * 1.25), Vector2(-r * 0.45, -r * 0.85),
+			]), col.darkened(0.25))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(r, -r * 0.85), Vector2(r * 0.72, -r * 1.25), Vector2(r * 0.45, -r * 0.85),
+			]), col.darkened(0.25))
 
-	# Damage feedback: brighten with missing HP.
-	if hp < max_hp:
+	# Health ring for anything damaged but alive.
+	if hp < max_hp and hp > 0:
 		var t := 1.0 - float(hp) / float(maxf(1, max_hp))
-		draw_arc(Vector2.ZERO, radius + 6.0, -PI / 2, -PI / 2 + TAU * t, 24,
-			Color(1, 1, 1, 0.75), 3.0)
+		draw_arc(Vector2.ZERO, radius + 7.0, -PI / 2, -PI / 2 + TAU * t, 28,
+			Color(1, 1, 1, 0.7), 3.0)
+
+	# Telegraph ring: shrinks toward the body as the attack lands, making timing readable.
+	if _telegraph != ATK_NONE and _telegraph_dur > 0.0:
+		var p := 1.0 - (_telegraph_t / _telegraph_dur)
+		draw_arc(Vector2.ZERO, radius + 26.0 * (1.0 - p), 0.0, TAU, 40,
+			Color(1.0, 0.85, 0.3, 0.9), 5.0)

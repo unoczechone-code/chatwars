@@ -28,3 +28,7 @@ SET_SFX,Sound,Звук
 SET_HAPTICS,Haptics,Вибрация
 PAUSED,Paused,Пауза
 CREDITS_TEXT,"Original offline game. Godot Engine 4.7.2 (MIT). All art created for this project.",Оригинальная офлайн-игра. Godot Engine 4.7.2 (MIT). Весь арт создан для этого проекта.
+OBJECTIVE,Survive and kill the boss. Wave 3 in %ds,Доживи и убей босса. 3-я волна через %d с
+OBJECTIVE_BOSS,Objective: kill the boss!,Цель: убей босса!
+BOSS,Boss,Босс
+BTN_PAUSE,II,II

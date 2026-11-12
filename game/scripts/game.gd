@@ -1,4 +1,4 @@
-# Game — one run from start to finish. Owns the clock, waves, spawning, and the
+# Game — one run from start to finish. Owns the clock, waves, spawning and the
 # win/lose decision. Everything is rebuilt per run; nothing survives a restart.
 extends Node2D
 class_name Game
@@ -6,6 +6,7 @@ class_name Game
 signal run_finished(won: bool, score: int, time: float)
 signal upgrade_requested
 signal stats_changed
+signal auto_paused
 
 const EnemyScript := preload("res://scripts/enemy.gd")
 const BulletScript := preload("res://scripts/bullet.gd")
@@ -21,7 +22,9 @@ var _rng := RandomNumberGenerator.new()
 var _spawn_t := 0.0
 var _upgrade_times: Array[float] = []
 var _paused := false
+var _paused_by_upgrade := false
 var _boss: Enemy = null
+var _auto_paused := false
 
 @onready var _field: Node2D = $Field
 
@@ -29,6 +32,7 @@ var _boss: Enemy = null
 func _ready() -> void:
 	balance = BalanceScript.new()
 	_rng.randomize()
+	_fit_field_to_viewport()
 	start_run()
 	var hud := $Hud
 	if hud != null:
@@ -36,11 +40,33 @@ func _ready() -> void:
 		hud.pause_pressed.connect(toggle_pause)
 
 
+func _notification(what: int) -> void:
+	# A phone call, app switch, lock screen, or the window closing must not keep the
+	# fight running: pause and let the player resume deliberately.
+	match what:
+		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, \
+		NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_WM_GO_BACK_REQUEST:
+			_auto_pause_for_interruption()
+
+
+## Pause when the app goes to the background so the player never returns to a dead run.
+func _auto_pause_for_interruption() -> void:
+	if state == null or state.finished or _paused:
+		return
+	_paused = true
+	_auto_paused = true
+	var hud := get_node_or_null("Hud")
+	if hud != null:
+		hud.set_paused_visible(true)
+	auto_paused.emit()
+
+
 func toggle_pause() -> void:
 	if state == null or state.finished:
 		return
 	_paused = not _paused
-	var hud := $Hud
+	_auto_paused = false
+	var hud := get_node_or_null("Hud")
 	if hud != null:
 		hud.set_paused_visible(_paused)
 
@@ -50,6 +76,8 @@ func start_run(seed_value: int = 0) -> void:
 		c.queue_free()
 	_boss = null
 	_paused = false
+	_paused_by_upgrade = false
+	_auto_paused = false
 	_upgrade_times = balance.upgrade_times.duplicate()
 	_spawn_t = 0.0
 
@@ -58,9 +86,6 @@ func start_run(seed_value: int = 0) -> void:
 
 	state = RunStateScript.new(balance)
 
-	# A run must always start unpaused, even if the previous one ended while the
-	# upgrade prompt or pause overlay had the clock stopped.
-	_paused = false
 	var hud_node := get_node_or_null("Hud")
 	if hud_node != null:
 		hud_node.set_paused_visible(false)
@@ -71,8 +96,45 @@ func start_run(seed_value: int = 0) -> void:
 	player.position = Vector2(360, 1080)
 	_field.add_child(player)
 	player.hp_changed.connect(_on_player_hp_changed)
+	player.shot_fired.connect(func() -> void: Audio.play("shoot", -14.0))
+	player.hurt.connect(func() -> void:
+		Audio.play("hurt", -8.0)
+		Audio.haptic("medium")
+	)
 
 	stats_changed.emit()
+
+
+## Keep the playfield aligned with the real viewport, including notches and rounded corners.
+func _fit_field_to_viewport() -> void:
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var visible_rect := vp.get_visible_rect()
+	var safe := DisplayServer.get_display_safe_area()
+	var top_inset := 0.0
+	var bottom_inset := 0.0
+	if safe.size.y > 0 and visible_rect.size.y > 0:
+		# Convert device pixels to the 720x1280 design space.
+		var scale := visible_rect.size.y / float(safe.size.y)
+		top_inset = float(safe.position.y) * scale
+		bottom_inset = float(safe.size.y - (safe.position.y + safe.size.y)) * scale
+		if bottom_inset < 0.0:
+			bottom_inset = 0.0
+	var bg := get_node_or_null("Background") as ColorRect
+	if bg != null:
+		bg.size = Vector2(720, 1280)
+	var hud := get_node_or_null("Hud")
+	if hud != null:
+		var top := hud.get_node_or_null("Top")
+		if top != null:
+			(top as Control).offset_top = maxf(40.0, top_inset + 24.0)
+		var bottom := hud.get_node_or_null("Bottom")
+		if bottom != null:
+			(bottom as Control).offset_bottom = -maxf(40.0, bottom_inset + 24.0)
+	var zone := Rect2(40.0, 800.0, 640.0, 420.0)
+	if player != null:
+		player.bounds = zone
 
 
 func set_paused(v: bool) -> void:
@@ -88,6 +150,7 @@ func spawn_player_bullet(pos: Vector2, vel: Vector2, dmg: int) -> void:
 		return
 	var b := BulletScript.new()
 	b.setup(pos, vel, dmg, true)
+	b.hit.connect(func() -> void: Audio.play("hit", -18.0))
 	_field.add_child(b)
 
 
@@ -113,15 +176,15 @@ func _physics_process(delta: float) -> void:
 		state.wave = new_wave
 		stats_changed.emit()
 
-	# Boss appears once, at the start of the third wave. This is checked before the
-	# upgrade prompt so a pending upgrade can never suppress the boss spawn.
+	# Boss appears once, at 120s. Checked before the upgrade prompt so a pending
+	# upgrade can never suppress the boss spawn.
 	if not state.boss_spawned and state.time >= balance.boss_spawn_time:
 		_spawn_boss()
 
-	# Scheduled upgrade picks pause the run.
 	if not _upgrade_times.is_empty() and state.time >= _upgrade_times[0]:
 		_upgrade_times.remove_at(0)
 		_paused = true
+		_paused_by_upgrade = true
 		upgrade_requested.emit()
 		return
 
@@ -204,10 +267,12 @@ func _spawn_boss() -> void:
 
 func _on_enemy_died(enemy: Enemy, score_value: int) -> void:
 	state.score += score_value
+	Audio.play("kill", -16.0)
 	if enemy == _boss:
 		state.boss_alive = false
 		_boss = null
 		_finish(true)
+		return
 	stats_changed.emit()
 
 
@@ -236,7 +301,10 @@ func _finish(won: bool) -> void:
 func apply_upgrade(id: String) -> void:
 	if state != null and id != "":
 		state.add_upgrade(id)
+		Audio.play("upgrade", -6.0)
+		Audio.haptic("light")
 	_paused = false
+	_paused_by_upgrade = false
 	stats_changed.emit()
 
 
@@ -253,6 +321,8 @@ func do_aoe() -> void:
 		if player.global_position.distance_to(enemy.global_position) <= radius:
 			enemy.take_damage(dmg)
 	_aoe_flash(player.global_position, radius)
+	Audio.play("aoe", -8.0)
+	Audio.haptic("medium")
 
 
 func _aoe_flash(pos: Vector2, radius: float) -> void:

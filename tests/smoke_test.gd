@@ -27,18 +27,12 @@ func _run() -> void:
 		quit(1)
 		return
 
-	# Deterministic start: wipe any save left by a previous test run. Creating a fresh
-	# SaveManager instance afterwards guarantees no in-memory state carries over.
+	# Deterministic start: wipe any save left by a previous test run, then reload it
+	# into the same manager so no in-memory state carries over.
 	for p in ["user://save.json", "user://save.json.bak", "user://save.corrupt.json"]:
 		if FileAccess.file_exists(p):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
-	var fresh_script: Script = load("res://scripts/save_manager.gd")
-	var fresh: Node = fresh_script.new()
-	root.remove_child(sm)
-	sm.free()
-	fresh.name = "SaveManager"
-	root.add_child(fresh)
-	sm = fresh
+	sm.load_game()
 
 	_check(sm.get_counter() == 0, "fresh counter is 0")
 	_check(sm.bump_counter() == 1, "bump_counter -> 1")

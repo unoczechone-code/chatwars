@@ -11,12 +11,17 @@ func _check(cond: bool, msg: String) -> void:
 
 
 func _init() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
 	print("=== MVP gameplay test ===")
 
-	var script_res: Script = load("res://scripts/save_manager.gd")
-	var sm: Node = script_res.new()
-	sm.name = "SaveManager"
-	root.add_child(sm)
+	var sm: Node = root.get_node_or_null("SaveManager")
+	_check(sm != null, "SaveManager autoload present")
+	if sm == null:
+		quit(1)
+		return
 
 	var scene: PackedScene = load("res://scenes/game.tscn")
 	_check(scene != null, "game.tscn loads")

@@ -28,6 +28,7 @@ locale/fallback="en"
 [autoload]
 
 SaveManager="*res://scripts/save_manager.gd"
+Audio="*res://scripts/audio.gd"
 
 [rendering]
 

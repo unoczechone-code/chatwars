@@ -3,6 +3,8 @@
 extends Area2D
 class_name Bullet
 
+signal hit()
+
 var velocity := Vector2.ZERO
 var damage := 10
 var lifetime := 2.0
@@ -56,6 +58,7 @@ func _physics_process(delta: float) -> void:
 	if best != null:
 		best.take_damage(damage)
 		_spent = true
+		hit.emit()
 		queue_free()
 
 

@@ -30,12 +30,12 @@ anchor_right = 1.0
 offset_left = 24.0
 offset_top = 40.0
 offset_right = -24.0
-offset_bottom = 200.0
+offset_bottom = 260.0
 grow_horizontal = 2
 
 [node name="Rows" type="VBoxContainer" parent="Hud/Top"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 6
 
 [node name="WaveLabel" type="Label" parent="Hud/Top/Rows"]
 layout_mode = 2
@@ -48,6 +48,12 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 46
 theme_override_colors/font_color = Color(0.93, 0.95, 0.99, 1)
 text = "3:00"
+
+[node name="ObjectiveLabel" type="Label" parent="Hud/Top/Rows"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.95, 0.78, 0.4, 1)
+text = "Objective"
 
 [node name="ScoreLabel" type="Label" parent="Hud/Top/Rows"]
 layout_mode = 2
@@ -80,23 +86,59 @@ offset_bottom = 64.0
 grow_horizontal = 0
 text = "II"
 
-[node name="Bottom" type="HBoxContainer" parent="Hud"]
+[node name="BossBar" type="VBoxContainer" parent="Hud"]
+visible = false
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -260.0
+offset_top = 270.0
+offset_right = 260.0
+offset_bottom = 340.0
+grow_horizontal = 2
+theme_override_constants/separation = 4
+
+[node name="Label" type="Label" parent="Hud/BossBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.98, 0.45, 0.55, 1)
+text = "Boss"
+horizontal_alignment = 1
+
+[node name="Bar" type="ProgressBar" parent="Hud/BossBar"]
+custom_minimum_size = Vector2(0, 22)
+layout_mode = 2
+value = 100.0
+show_percentage = false
+
+[node name="Bottom" type="VBoxContainer" parent="Hud"]
 layout_mode = 1
 anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 24.0
-offset_top = -140.0
+offset_top = -180.0
 offset_right = -24.0
 offset_bottom = -40.0
 grow_horizontal = 2
 grow_vertical = 0
 alignment = 2
+theme_override_constants/separation = 8
+
+[node name="AoeBar" type="ProgressBar" parent="Hud/Bottom"]
+custom_minimum_size = Vector2(240, 10)
+layout_mode = 2
+size_flags_horizontal = 8
+max_value = 6.0
+value = 6.0
+show_percentage = false
 
 [node name="AoeButton" type="Button" parent="Hud/Bottom"]
-custom_minimum_size = Vector2(240, 100)
+custom_minimum_size = Vector2(240, 96)
 layout_mode = 2
+size_flags_horizontal = 8
 theme_override_font_sizes/font_size = 30
 text = "AoE"
 

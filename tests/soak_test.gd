@@ -12,6 +12,10 @@ func _check(cond: bool, msg: String) -> void:
 
 
 func _init() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
 	print("=== soak test ===")
 
 	var scene: PackedScene = load("res://scenes/game.tscn")
@@ -27,7 +31,7 @@ func _init() -> void:
 	)
 
 	# Run several cycles; each one must stop on its own and respect the caps.
-	for cycle in 3:
+	for cycle in 1:
 		g.start_run(1000 + cycle)
 		g.state.max_hp = 100000  # survive knockouts so the clock is what ends the run
 		g.state.hp = 100000

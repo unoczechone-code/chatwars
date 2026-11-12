@@ -4,6 +4,7 @@ class_name Player
 
 signal hp_changed(hp: int, max_hp: int)
 signal hurt()
+signal shot_fired()
 
 const RADIUS := 30.0
 
@@ -112,6 +113,7 @@ func _fire_at(target: Enemy) -> void:
 		return
 	var dir := (target.global_position - global_position).normalized()
 	battlefield.spawn_player_bullet(global_position, dir * 1150.0, state.damage())
+	shot_fired.emit()
 
 
 func _hurt(amount: int) -> void:
